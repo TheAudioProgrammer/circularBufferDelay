@@ -145,8 +145,9 @@ void CircularBufferDelayAudioProcessor::processBlock (juce::AudioBuffer<float>& 
     {
         auto* channelData = buffer.getWritePointer (channel);
         fillBuffer (channel, bufferSize, delayBufferSize, channelData);
+        readFromBuffer (channel, writePosition, buffer, delayBuffer);
     }
-        
+            
     writePosition += bufferSize;
     writePosition %= delayBufferSize;
 }
@@ -173,6 +174,31 @@ void CircularBufferDelayAudioProcessor::fillBuffer (int channel, int bufferSize,
         
         // Copy remaining amount to beginning of delay buffer
         delayBuffer.copyFrom (channel, 0, channelData + numSamplesToEnd, numSamplesAtStart);
+    }
+}
+
+void CircularBufferDelayAudioProcessor::readFromBuffer (int channel, int writePosition, juce::AudioBuffer<float>& buffer, juce::AudioBuffer<float>& delayBuffer)
+{
+    auto bufferSize = buffer.getNumSamples();
+    auto delayBufferSize = delayBuffer.getNumSamples();
+    auto readPosition = std::floor (writePosition - (getSampleRate() * delayInMillis / 1000.0f));
+    auto gain = 0.5f;
+    
+    if (readPosition < 0)
+        readPosition += delayBufferSize;
+    
+    // Copy delayed data from the past to main buffer
+    if (readPosition + bufferSize <= delayBufferSize)
+    {
+        buffer.addFromWithRamp (channel, 0, delayBuffer.getReadPointer (channel, readPosition), bufferSize, gain, gain);
+    }
+    else
+    {
+        auto numSamplesToEnd = delayBufferSize - readPosition;
+        buffer.addFromWithRamp (channel, 0, delayBuffer.getReadPointer (channel, readPosition), numSamplesToEnd, gain, gain);
+        
+        auto numSamplesAtStart = bufferSize - numSamplesToEnd;
+        buffer.addFromWithRamp (channel, numSamplesToEnd, delayBuffer.getReadPointer (channel, 0), numSamplesAtStart, gain, gain);
     }
 }
 

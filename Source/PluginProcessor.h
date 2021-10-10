@@ -55,8 +55,10 @@ public:
 
 private:
     void fillBuffer (int channel, int bufferSize, int delayBufferSize, float* channelData);
+    void readFromBuffer (int channel, int writePosition, juce::AudioBuffer<float>& buffer, juce::AudioBuffer<float>& delayBuffer);
     
     juce::AudioBuffer<float> delayBuffer;
+    std::atomic<float> delayInMillis { 300.0f };
     int writePosition { 0 };
     
     //==============================================================================
