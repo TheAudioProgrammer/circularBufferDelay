@@ -95,6 +95,12 @@ void CircularBufferDelayAudioProcessor::prepareToPlay (double sampleRate, int sa
 {
     auto delayBufferSize = sampleRate * 2.0;
     delayBuffer.setSize (getTotalNumOutputChannels(), (int)delayBufferSize);
+    
+    for (int ch = 0; ch < getTotalNumOutputChannels(); ++ch)
+    {
+        delayInMillis[ch].reset (sampleRate, 0.05f);
+        feedback[ch].reset (sampleRate, 0.05f);
+    }
 }
 
 void CircularBufferDelayAudioProcessor::releaseResources()
@@ -140,6 +146,9 @@ void CircularBufferDelayAudioProcessor::processBlock (juce::AudioBuffer<float>& 
 
     auto bufferSize = buffer.getNumSamples();
     auto delayBufferSize = delayBuffer.getNumSamples();
+    auto* wet = params.getRawParameterValue ("WET");
+    
+    buffer.applyGain (0, bufferSize, 1.0f - (wet->load() / 100.0f));
     
     for (int channel = 0; channel < totalNumInputChannels; ++channel)
     {
@@ -153,6 +162,7 @@ void CircularBufferDelayAudioProcessor::processBlock (juce::AudioBuffer<float>& 
     writePosition %= delayBufferSize;
 }
 
+// Copy contents of main buffer to the circular delay buffer
 void CircularBufferDelayAudioProcessor::fillBuffer (int channel, int bufferSize, int delayBufferSize, float* channelData)
 {
     // Check to see if main buffer copies to delay buffer without needing to wrap...
@@ -178,10 +188,45 @@ void CircularBufferDelayAudioProcessor::fillBuffer (int channel, int bufferSize,
     }
 }
 
+// Read data from the past in the circular delay buffer and add it back to the main buffer
+void CircularBufferDelayAudioProcessor::readFromBuffer (int channel, int writePosition, juce::AudioBuffer<float>& buffer, juce::AudioBuffer<float>& delayBuffer)
+{
+    auto bufferSize = buffer.getNumSamples();
+    auto delayBufferSize = delayBuffer.getNumSamples();
+    auto wet = params.getRawParameterValue ("WET");
+    auto gain = wet->load() / 100.0f;
+    auto* delay = params.getRawParameterValue ("DELAYAMOUNT");
+    
+    delayInMillis[channel].setTargetValue (delay->load());
+    
+    auto readPosition = std::floor (writePosition - (getSampleRate() * delayInMillis[channel].getNextValue() / 1000.0f));
+    
+    if (readPosition < 0)
+        readPosition += delayBufferSize;
+    
+    // Copy delayed data from the past to main buffer
+    if (readPosition + bufferSize <= delayBufferSize)
+    {
+        buffer.addFromWithRamp (channel, 0, delayBuffer.getReadPointer (channel, readPosition), bufferSize, gain, gain);
+    }
+    else
+    {
+        auto numSamplesToEnd = delayBufferSize - readPosition;
+        buffer.addFromWithRamp (channel, 0, delayBuffer.getReadPointer (channel, readPosition), numSamplesToEnd, gain, gain);
+        
+        auto numSamplesAtStart = bufferSize - numSamplesToEnd;
+        buffer.addFromWithRamp (channel, numSamplesToEnd, delayBuffer.getReadPointer (channel, 0), numSamplesAtStart, gain, gain);
+    }
+}
+
+// Feed some of the main buffer (that now has delayed data added in) back into the delayed buffer to create an echo effect
 void CircularBufferDelayAudioProcessor::feedbackBuffer (int channel, int bufferSize, int delayBufferSize, float* channelData)
 {
-    float feedback = *params.getRawParameterValue ("FEEDBACK");
-    float gain = juce::Decibels::decibelsToGain (feedback);
+    auto* fb = params.getRawParameterValue ("FEEDBACK");
+    
+    feedback[channel].setTargetValue (fb->load());
+    
+    float gain = juce::Decibels::decibelsToGain (feedback[channel].getNextValue());
     
     // Check to see if main buffer copies to delay buffer without needing to wrap...
     if (delayBufferSize > bufferSize + writePosition)
@@ -203,32 +248,6 @@ void CircularBufferDelayAudioProcessor::feedbackBuffer (int channel, int bufferS
         
         // Copy remaining amount to beginning of delay buffer
         delayBuffer.addFromWithRamp (channel, 0, channelData + numSamplesToEnd, numSamplesAtStart, gain, gain);
-    }
-}
-
-void CircularBufferDelayAudioProcessor::readFromBuffer (int channel, int writePosition, juce::AudioBuffer<float>& buffer, juce::AudioBuffer<float>& delayBuffer)
-{
-    auto bufferSize = buffer.getNumSamples();
-    auto delayBufferSize = delayBuffer.getNumSamples();
-    auto gain = 0.5f;
-    float delayInMillis = *params.getRawParameterValue ("DELAYAMOUNT");
-    auto readPosition = std::floor (writePosition - (getSampleRate() * delayInMillis / 1000.0f));
-    
-    if (readPosition < 0)
-        readPosition += delayBufferSize;
-    
-    // Copy delayed data from the past to main buffer
-    if (readPosition + bufferSize <= delayBufferSize)
-    {
-        buffer.addFromWithRamp (channel, 0, delayBuffer.getReadPointer (channel, readPosition), bufferSize, gain, gain);
-    }
-    else
-    {
-        auto numSamplesToEnd = delayBufferSize - readPosition;
-        buffer.addFromWithRamp (channel, 0, delayBuffer.getReadPointer (channel, readPosition), numSamplesToEnd, gain, gain);
-        
-        auto numSamplesAtStart = bufferSize - numSamplesToEnd;
-        buffer.addFromWithRamp (channel, numSamplesToEnd, delayBuffer.getReadPointer (channel, 0), numSamplesAtStart, gain, gain);
     }
 }
 
@@ -270,7 +289,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout CircularBufferDelayAudioProc
     std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
     
     params.push_back (std::make_unique<juce::AudioParameterFloat>("DELAYAMOUNT", "Delay Amount", 0.0f, 2000.0f, 0.0f));
-    params.push_back (std::make_unique<juce::AudioParameterFloat>("FEEDBACK", "Feedback", -60.0f, 1.0f, -60.0f));
+    params.push_back (std::make_unique<juce::AudioParameterFloat>("FEEDBACK", "Feedback", -60.0f, 6.0f, -60.0f));
+    params.push_back (std::make_unique<juce::AudioParameterFloat>("WET", "Wet", 0.0f, 100.0f, 0.0f));
 
     return { params.begin(), params.end() };
 }

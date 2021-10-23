@@ -60,9 +60,9 @@ private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameters();
     
     juce::AudioProcessorValueTreeState params;
-    
     juce::AudioBuffer<float> delayBuffer;
-    //std::atomic<float> delayInMillis { 0.0f };
+    juce::LinearSmoothedValue<float> delayInMillis[2] { 0.0f };
+    juce::LinearSmoothedValue<float> feedback[2] { 0.0f };
     int writePosition { 0 };
     
     //==============================================================================
