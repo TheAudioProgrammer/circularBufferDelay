@@ -19,7 +19,7 @@ CircularBufferDelayAudioProcessor::CircularBufferDelayAudioProcessor()
                       #endif
                        .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
                      #endif
-                       )
+                       ), params (*this, nullptr, "Parameters", createParameters())
 #endif
 {
 }
@@ -137,27 +137,27 @@ void CircularBufferDelayAudioProcessor::processBlock (juce::AudioBuffer<float>& 
 
     for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
         buffer.clear (i, 0, buffer.getNumSamples());
-
-    auto bufferSize = buffer.getNumSamples();
-    auto delayBufferSize = delayBuffer.getNumSamples();
     
     for (int channel = 0; channel < totalNumInputChannels; ++channel)
     {
-        auto* channelData = buffer.getWritePointer (channel);
-        fillBuffer (channel, bufferSize, delayBufferSize, channelData);
+        fillBuffer (buffer, channel);
+        readFromBuffer (buffer, delayBuffer, channel);
+        feedbackBuffer (buffer, channel);
     }
         
-    writePosition += bufferSize;
-    writePosition %= delayBufferSize;
+    updateBufferPositions (buffer, delayBuffer);
 }
 
-void CircularBufferDelayAudioProcessor::fillBuffer (int channel, int bufferSize, int delayBufferSize, float* channelData)
+void CircularBufferDelayAudioProcessor::fillBuffer (juce::AudioBuffer<float>& buffer, int channel)
 {
+    auto bufferSize = buffer.getNumSamples();
+    auto delayBufferSize = delayBuffer.getNumSamples();
+    
     // Check to see if main buffer copies to delay buffer without needing to wrap...
-    if (delayBufferSize > bufferSize + writePosition)
+    if (delayBufferSize >= bufferSize + writePosition)
     {
         // copy main buffer contents to delay buffer
-        delayBuffer.copyFrom (channel, writePosition, channelData, bufferSize);
+        delayBuffer.copyFrom (channel, writePosition, buffer.getWritePointer (channel), bufferSize);
     }
     // if no
     else
@@ -166,14 +166,86 @@ void CircularBufferDelayAudioProcessor::fillBuffer (int channel, int bufferSize,
         auto numSamplesToEnd = delayBufferSize - writePosition;
         
         // Copy that amount of contents to the end...
-        delayBuffer.copyFrom (channel, writePosition, channelData, numSamplesToEnd);
+        delayBuffer.copyFrom (channel, writePosition, buffer.getWritePointer (channel), numSamplesToEnd);
         
         // Calculate how much contents is remaining to copy
         auto numSamplesAtStart = bufferSize - numSamplesToEnd;
         
         // Copy remaining amount to beginning of delay buffer
-        delayBuffer.copyFrom (channel, 0, channelData + numSamplesToEnd, numSamplesAtStart);
+        delayBuffer.copyFrom (channel, 0, buffer.getWritePointer (channel, numSamplesToEnd), numSamplesAtStart);
     }
+}
+
+void CircularBufferDelayAudioProcessor::feedbackBuffer (juce::AudioBuffer<float>& buffer, int channel)
+{
+    auto bufferSize = buffer.getNumSamples();
+    auto delayBufferSize = delayBuffer.getNumSamples();
+    // feedback
+    auto fb = params.getRawParameterValue ("FEEDBACK")->load();
+    
+    // Check to see if main buffer copies to delay buffer without needing to wrap...
+    if (delayBufferSize >= bufferSize + writePosition)
+    {
+        // copy main buffer contents to delay buffer
+        delayBuffer.addFromWithRamp (channel, writePosition, buffer.getWritePointer (channel), bufferSize, fb, fb);
+    }
+    // if no
+    else
+    {
+        // Determine how much space is left at the end of the delay buffer
+        auto numSamplesToEnd = delayBufferSize - writePosition;
+        
+        // Copy that amount of contents to the end...
+        delayBuffer.addFromWithRamp (channel, writePosition, buffer.getWritePointer (channel), numSamplesToEnd, fb, fb);
+        
+        // Calculate how much contents is remaining to copy
+        auto numSamplesAtStart = bufferSize - numSamplesToEnd;
+        
+        // Copy remaining amount to beginning of delay buffer
+        delayBuffer.addFromWithRamp (channel, 0, buffer.getWritePointer (channel, numSamplesToEnd), numSamplesAtStart, fb, fb);
+    }
+}
+
+void CircularBufferDelayAudioProcessor::readFromBuffer (juce::AudioBuffer<float>& buffer, juce::AudioBuffer<float>& delayBuffer, int channel)
+{
+    auto bufferSize = buffer.getNumSamples();
+    auto delayBufferSize = delayBuffer.getNumSamples();
+    
+    auto percent = params.getRawParameterValue ("DRY/WET")->load();
+    auto g = juce::jmap (percent, 0.0f, 100.0f, 0.0f, 1.0f);
+    auto dryGain = 1.0f - g;
+    
+    auto delayTime = params.getRawParameterValue ("DELAYMS")->load();
+    
+    // delayMs
+    auto readPosition = std::round (writePosition - (getSampleRate() * delayTime / 1000.0f));
+    
+    if (readPosition < 0)
+        readPosition += delayBufferSize;
+    
+    buffer.applyGainRamp (0, bufferSize, dryGain, dryGain);
+    
+    if (readPosition + bufferSize < delayBufferSize)
+    {
+        buffer.addFromWithRamp (channel, 0, delayBuffer.getReadPointer (channel, readPosition), bufferSize, g, g);
+    }
+    else
+    {
+        auto numSamplesToEnd = delayBufferSize - readPosition;
+        buffer.addFromWithRamp (channel, 0, delayBuffer.getReadPointer (channel, readPosition), numSamplesToEnd, g, g);
+        
+        auto numSamplesAtStart = bufferSize - numSamplesToEnd;
+        buffer.addFromWithRamp (channel, numSamplesToEnd, delayBuffer.getReadPointer (channel, 0), numSamplesAtStart, g, g);
+    }
+}
+
+void CircularBufferDelayAudioProcessor::updateBufferPositions (juce::AudioBuffer<float>& buffer, juce::AudioBuffer<float>& delayBuffer)
+{
+    auto bufferSize = buffer.getNumSamples();
+    auto delayBufferSize = delayBuffer.getNumSamples();
+    
+    writePosition += bufferSize;
+    writePosition %= delayBufferSize;
 }
 
 //==============================================================================
@@ -184,7 +256,7 @@ bool CircularBufferDelayAudioProcessor::hasEditor() const
 
 juce::AudioProcessorEditor* CircularBufferDelayAudioProcessor::createEditor()
 {
-    return new CircularBufferDelayAudioProcessorEditor (*this);
+    return new juce::GenericAudioProcessorEditor (*this);
 }
 
 //==============================================================================
@@ -206,4 +278,15 @@ void CircularBufferDelayAudioProcessor::setStateInformation (const void* data, i
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
     return new CircularBufferDelayAudioProcessor();
+}
+
+juce::AudioProcessorValueTreeState::ParameterLayout CircularBufferDelayAudioProcessor::createParameters()
+{
+    std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
+    
+    params.push_back (std::make_unique<juce::AudioParameterFloat>("DELAYMS", "Delay Ms", 0.0f, 2000.0f, 0.0f));
+    params.push_back (std::make_unique<juce::AudioParameterFloat>("FEEDBACK", "Feedback", 0.0f, 1.0f, 0.0f));
+    params.push_back (std::make_unique<juce::AudioParameterFloat>("DRY/WET", "Dry/Wet", 0.0f, 100.0f, 0.0f));
+    
+    return { params.begin(), params.end() };
 }
