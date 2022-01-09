@@ -54,9 +54,11 @@ public:
     void setStateInformation (const void* data, int sizeInBytes) override;
 
 private:
-    void fillBuffer (int channel, int bufferSize, int delayBufferSize, float* channelData);
-    void feedbackBuffer (int channel, int bufferSize, int delayBufferSize, float* channelData);
-    void readFromBuffer (int channel, int writePosition, juce::AudioBuffer<float>& buffer, juce::AudioBuffer<float>& delayBuffer);
+    void fillBuffer (juce::AudioBuffer<float>& buffer, int channel);
+    void feedbackBuffer (juce::AudioBuffer<float>& buffer, int channel);
+    void readFromBuffer (juce::AudioBuffer<float>& buffer, juce::AudioBuffer<float>& delayBuffer, int channel);
+    void updateBufferPositions (juce::AudioBuffer<float>& buffer, juce::AudioBuffer<float>& delayBuffer);
+
     juce::AudioProcessorValueTreeState::ParameterLayout createParameters();
     
     juce::AudioProcessorValueTreeState params;
