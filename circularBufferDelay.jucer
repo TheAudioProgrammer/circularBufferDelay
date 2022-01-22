@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <JUCERPROJECT id="Ki2asj" name="circularBufferDelay" projectType="audioplug"
-              useAppConfig="0" addUsingNamespaceToJuceHeader="0" jucerFormatVersion="1"
-              pluginManufacturer="The Audio Programmer">
+              useAppConfig="0" addUsingNamespaceToJuceHeader="0" jucerFormatVersion="1">
   <MAINGROUP id="gGuSZn" name="circularBufferDelay">
     <GROUP id="{A1F4B267-B5C9-8828-91B9-B201DECC6A2F}" name="Source">
       <FILE id="DVOBLL" name="PluginProcessor.cpp" compile="1" resource="0"

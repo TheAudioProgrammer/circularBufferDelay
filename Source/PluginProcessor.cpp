@@ -190,7 +190,15 @@ void CircularBufferDelayAudioProcessor::feedbackBuffer (juce::AudioBuffer<float>
     auto bufferSize = buffer.getNumSamples();
     auto delayBufferSize = delayBuffer.getNumSamples();
     // feedback
-    auto fb = params.getRawParameterValue ("FEEDBACK")->load();
+    auto fbLeft = params.getRawParameterValue ("FEEDBACKLEFT")->load();
+    auto fbRight = params.getRawParameterValue ("FEEDBACKRIGHT")->load();
+    
+    if (params.getRawParameterValue ("FBLINK")->load() == true)
+    {
+        fbRight = fbLeft;
+    }
+    
+    auto fb = channel == 0 ? fbLeft : fbRight;
     
     // Check to see if main buffer copies to delay buffer without needing to wrap...
     if (delayBufferSize >= bufferSize + writePosition)
@@ -224,7 +232,15 @@ void CircularBufferDelayAudioProcessor::readFromBuffer (juce::AudioBuffer<float>
     auto g = juce::jmap (percent, 0.0f, 100.0f, 0.0f, 1.0f);
     auto dryGain = 1.0f - g;
     
-    auto delayTime = params.getRawParameterValue ("DELAYMS")->load();
+    auto delayTimeLeft = params.getRawParameterValue ("DELAYMSLEFT")->load();
+    auto delayTimeRight = params.getRawParameterValue ("DELAYMSRIGHT")->load();
+    
+    if (params.getRawParameterValue ("DELAYLINK")->load() == true)
+    {
+        delayTimeRight = delayTimeLeft;
+    }
+    
+    auto delayTime = channel == 0 ? delayTimeLeft : delayTimeRight;
     
     // delayMs
     auto readPosition = std::round (writePosition - (getSampleRate() * delayTime / 1000.0f));
@@ -293,8 +309,17 @@ juce::AudioProcessorValueTreeState::ParameterLayout CircularBufferDelayAudioProc
 {
     std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
     
-    params.push_back (std::make_unique<juce::AudioParameterFloat>("DELAYMS", "Delay Ms", 0.0f, 2000.0f, 0.0f));
-    params.push_back (std::make_unique<juce::AudioParameterFloat>("FEEDBACK", "Feedback", 0.0f, 1.0f, 0.0f));
+    params.push_back (std::make_unique<juce::AudioParameterFloat>("DELAYMSLEFT", "Delay Ms Left", 0.0f, 2000.0f, 0.0f));
+    params.push_back (std::make_unique<juce::AudioParameterFloat>("DELAYMSRIGHT", "Delay Ms Right", 0.0f, 2000.0f, 0.0f));
+    
+    params.push_back (std::make_unique<juce::AudioParameterBool>("DELAYLINK", "Delay Link", false));
+
+    
+    params.push_back (std::make_unique<juce::AudioParameterFloat>("FEEDBACKLEFT", "Feedback Left", 0.0f, 1.0f, 0.0f));
+    params.push_back (std::make_unique<juce::AudioParameterFloat>("FEEDBACKRIGHT", "Feedback Right", 0.0f, 1.0f, 0.0f));
+    
+    params.push_back (std::make_unique<juce::AudioParameterBool>("FBLINK", "Feedback Link", false));
+    
     params.push_back (std::make_unique<juce::AudioParameterFloat>("DRYWET", "Dry/Wet", 0.0f, 100.0f, 0.0f));
     
     return { params.begin(), params.end() };
